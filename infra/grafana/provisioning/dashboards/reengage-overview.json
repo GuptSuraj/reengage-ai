@@ -1,0 +1,43 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Accepted behaviour events / second",
+      "id": 1,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(rate(reengage_events_accepted_total[5m]))", "legendFormat": "accepted"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Duplicate events / second",
+      "id": 2,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "sum(rate(reengage_events_duplicates_total[5m]))", "legendFormat": "duplicates"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "Core HTTP P95 latency",
+      "id": 3,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))", "legendFormat": "p95"}]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM heap",
+      "id": 4,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "used"}]
+    }
+  ],
+  "schemaVersion": 41,
+  "tags": ["reengageai"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "ReEngageAI Overview",
+  "uid": "reengage-overview",
+  "version": 1
+}

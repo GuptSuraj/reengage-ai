@@ -1,0 +1,267 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reengage
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reengage-config
+  namespace: reengage
+data:
+  DATABASE_URL: jdbc:postgresql://postgres.example.internal:5432/reengage
+  REDIS_HOST: redis.example.internal
+  KAFKA_BOOTSTRAP_SERVERS: kafka.example.internal:9092
+  AI_BASE_URL: http://ai-service:8000
+  CORE_API_URL: http://core-api:8080
+  FRONTEND_URL: https://reengage.example.com
+  REENGAGE_AI_QDRANT_URL: https://qdrant.example.internal
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability:4318/v1/traces
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: reengage-secrets
+  namespace: reengage
+type: Opaque
+stringData:
+  DATABASE_USER: replace-me
+  DATABASE_PASSWORD: replace-me
+  JWT_SECRET: replace-with-at-least-32-random-bytes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+  namespace: reengage
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: core-api}
+  template:
+    metadata:
+      labels: {app: core-api}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: core-api
+          image: ghcr.io/your-org/reengage-core-api:1.0.0
+          ports: [{name: http, containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: reengage-config}
+            - secretRef: {name: reengage-secrets}
+          env:
+            - {name: NOTIFICATION_DELAY, value: PT24H}
+          readinessProbe:
+            httpGet: {path: /actuator/health/readiness, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /actuator/health/liveness, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 300m, memory: 512Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-api
+  namespace: reengage
+spec:
+  selector: {app: core-api}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+  namespace: reengage
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: ai-service}
+  template:
+    metadata:
+      labels: {app: ai-service}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: ai-service
+          image: ghcr.io/your-org/reengage-ai-service:1.0.0
+          ports: [{name: http, containerPort: 8000}]
+          envFrom:
+            - configMapRef: {name: reengage-config}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: reengage
+spec:
+  selector: {app: ai-service}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: reengage
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: frontend
+          image: ghcr.io/your-org/reengage-frontend:1.0.0
+          ports: [{name: http, containerPort: 3000}]
+          envFrom:
+            - configMapRef: {name: reengage-config}
+          env:
+            - {name: COOKIE_SECURE, value: "true"}
+          readinessProbe:
+            httpGet: {path: /login, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /login, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: reengage
+spec:
+  selector: {app: frontend}
+  ports: [{name: http, port: 3000, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: core-api
+  namespace: reengage
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: core-api}
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 65}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-service
+  namespace: reengage
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: ai-service}
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 65}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: core-api
+  namespace: reengage
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: core-api}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-service
+  namespace: reengage
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: ai-service}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: reengage
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: application-traffic
+  namespace: reengage
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [frontend, core-api, ai-service]}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: {}
+  egress:
+    - to:
+        - namespaceSelector: {}
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 6379}
+        - {protocol: TCP, port: 9092}
+        - {protocol: TCP, port: 6333}
+        - {protocol: TCP, port: 4318}

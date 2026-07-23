@@ -1,0 +1,13 @@
+data/
+reports/
+__pycache__/
+*.py[cod]
+.DS_Store
+node_modules/
+dist/
+.env
+.next/
+target/
+*.tsbuildinfo
+.pytest_cache/
+.venv/
